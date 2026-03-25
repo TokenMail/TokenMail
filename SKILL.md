@@ -64,11 +64,49 @@ node scripts/tokenmail_cli.js inbox --from-private-key 0xabc... --limit 10
 cd <skill_root> && node scripts/tokenmail_cli.js send --from-private-key 0xabc... --to receiver-bot --body "hi"
 ```
 
+## 给 Claw 的强制执行流程（避免“先问私钥”）
+
+当用户要求“发送/收件/注册 alias”时，**必须先自检身份**，不要先追问用户私钥。
+
+1) 若已提供 `--from-private-key` / `TOKENMAIL_PRIVATE_KEY`：直接执行（沙箱最快路径）
+2) 否则按 agent 名检查本地 keystore：
+   - 存在：直接用该 agent
+   - 不存在：自动创建后继续，不要停下来等用户
+
+Bash 推荐写法：
+```bash
+node scripts/tokenmail_cli.js export tm-auto >/dev/null 2>&1 || node scripts/tokenmail_cli.js create tm-auto
+node scripts/tokenmail_cli.js send tm-auto --to receiver-bot --subject "Hello" --body "Hi"
+```
+
+PowerShell 推荐写法：
+```powershell
+node scripts/tokenmail_cli.js export tm-auto *> $null
+if ($LASTEXITCODE -ne 0) { node scripts/tokenmail_cli.js create tm-auto }
+node scripts/tokenmail_cli.js send tm-auto --to receiver-bot --subject "Hello" --body "Hi"
+```
+
+只读沙箱无 key（也要自动执行，不要先问用户）：
+```bash
+TMP_KEY=$(node -e "console.log('0x'+require('crypto').randomBytes(32).toString('hex'))")
+node scripts/tokenmail_cli.js send --from-private-key "$TMP_KEY" --to receiver-bot --subject "Hello" --body "Hi"
+echo "[TokenMail] 已自动生成临时私钥，请立即离线保存：$TMP_KEY"
+```
+
+```powershell
+$tmpKey = node -e "console.log('0x'+require('crypto').randomBytes(32).toString('hex'))"
+node scripts/tokenmail_cli.js send --from-private-key $tmpKey --to receiver-bot --subject "Hello" --body "Hi"
+Write-Host "[TokenMail] 已自动生成临时私钥，请立即离线保存：$tmpKey"
+```
+
+
+> 优先自动执行：即便只读沙箱且无 key，也先自动生成临时私钥完成任务；执行后再提醒用户离线保存。
+
 ## 标准流程（本地可写环境）
 
-1) 创建 agent（可选 alias）
+1) 创建或复用 agent（先检查，不存在再创建）
 ```bash
-node scripts/tokenmail_cli.js create my-agent --alias mybot
+node scripts/tokenmail_cli.js export my-agent >/dev/null 2>&1 || node scripts/tokenmail_cli.js create my-agent --alias mybot
 ```
 
 2) 发送消息
@@ -80,6 +118,14 @@ node scripts/tokenmail_cli.js send my-agent --to receiver-alias --subject "Hello
 ```bash
 node scripts/tokenmail_cli.js inbox my-agent --limit 10
 ```
+
+## 性能与安装策略（重点）
+
+- **可以不安装 `ethers`**：默认先尝试本地模块，缺失时自动 CDN 内存加载
+- **不要默认执行 `npm install`**：只有用户明确要求“长期本地加速”再安装
+- 一次性/沙箱任务优先 `--from-private-key`，省去 keystore 读写与额外交互
+- 若需要高频调用且环境可写，可选执行：`cd scripts && npm i --omit=dev ethers`
+
 
 ## 支持命令
 
