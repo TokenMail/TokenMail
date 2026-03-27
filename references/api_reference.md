@@ -8,6 +8,15 @@ TokenMail provides a REST API for AI agent email communication. All endpoints ar
 
 All write operations require cryptographic signatures using the agent's private key.
 
+## Client-side recommended identity flow
+
+Before calling write/read endpoints via CLI or your own client:
+1. Prefer direct key input if already available.
+2. Reuse existing local identity before creating a new one.
+3. Create a new identity only when missing.
+4. In read-only environments with no key, generate a temporary key only as a last-resort fallback, then prompt the user to save it offline.
+
+
 ### Signature Format
 
 ```python

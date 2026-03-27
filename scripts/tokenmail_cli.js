@@ -18,6 +18,7 @@ function usage() {
 
 Commands:
   create <name> [--alias <alias>] [--mnemonic "..."] [--private-key 0x...] [--keystore <dir>] [--api-url <url>]
+  ensure <name> [--alias <alias>] [--mnemonic "..."] [--private-key 0x...] [--keystore <dir>] [--api-url <url>]
   list [--keystore <dir>]
   send [agent] --to <recipient> [--subject <s>] [--body <b>] [--json '{...}'] [--from-private-key 0x...] [--from-mnemonic "..."] [--api-url <url>] [--keystore <dir>]
   send-external [agent] --to <email> --subject <s> --body <b> [--html <html>] [--no-sign] [--from-private-key 0x...] [--from-mnemonic "..."] [--api-url <url>] [--keystore <dir>]
@@ -392,6 +393,71 @@ async function cmdImport(args) {
   console.log(`Imported agent '${name}' (${wallet.address})`);
 }
 
+async function cmdEnsure(args) {
+  const name = args._[0];
+  if (!name) throw new Error("Missing agent name");
+
+  const { apiUrl, keystoreDir } = getCommon(args);
+  const ks = new PlainKeystore(keystoreDir);
+
+  let record = ks.loadAgent(name);
+  let created = false;
+  let wallet;
+
+  if (!record) {
+    const { Wallet } = await getEthers();
+    const recordOpts = { alias: args.alias || null, mnemonic: null, private_key: null };
+
+    if (args["private-key"]) {
+      wallet = new Wallet(String(args["private-key"]));
+      recordOpts.private_key = wallet.privateKey;
+    } else if (args.mnemonic) {
+      wallet = Wallet.fromPhrase(String(args.mnemonic));
+      recordOpts.mnemonic = String(args.mnemonic);
+    } else {
+      wallet = Wallet.createRandom();
+      recordOpts.mnemonic = wallet.mnemonic.phrase;
+    }
+
+    record = buildAgentRecord(name, wallet, recordOpts);
+    ks.saveAgent(record);
+    created = true;
+
+    try {
+      await uploadPubkey(apiUrl, wallet);
+    } catch (err) {
+      console.log(`Warning: upload_pubkey failed: ${err.message}`);
+    }
+
+    if (record.alias) {
+      try {
+        await registerAlias(apiUrl, wallet, record.alias);
+      } catch (err) {
+        console.log(`Warning: alias registration failed: ${err.message}`);
+      }
+    }
+  } else {
+    wallet = await walletFromRecord(record);
+
+    if (args.alias && args.alias !== record.alias) {
+      try {
+        await registerAlias(apiUrl, wallet, String(args.alias));
+        record = { ...record, alias: String(args.alias) };
+        ks.saveAgent(record);
+      } catch (err) {
+        console.log(`Warning: alias registration failed: ${err.message}`);
+      }
+    }
+  }
+
+  console.log(JSON.stringify({
+    name: record.name,
+    address: record.address,
+    alias: record.alias,
+    created
+  }, null, 2));
+}
+
 async function cmdList(args) {
   const { keystoreDir } = getCommon(args);
   const ks = new PlainKeystore(keystoreDir);
@@ -596,6 +662,7 @@ async function main() {
 
   const handlers = {
     create: cmdCreate,
+    ensure: cmdEnsure,
     import: cmdImport,
     list: cmdList,
     send: cmdSend,
